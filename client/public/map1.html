@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Geolocation with Address</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.8.0/dist/leaflet.css"
+    />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"
+    />
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div id="map" style="width: 100%; height: 100vh"></div>
+
+    <script src="https://unpkg.com/leaflet@1.8.0/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
+
+    <script>
+      // Haversine formula to calculate distance in kilometers
+
+      function getCoordinates() {
+        const user = JSON.parse(localStorage.getItem("user"));
+                  // `http://localhost:8000/api/v1/users/patients/${user._id}/nearest-nurses`
+            return fetch(`http://localhost:8000/api/v1/users/getPC/${user._id}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error("Network response was not ok: " + response.statusText);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    console.log("Coordinates data received:", data.data.loc.coordinates);
+                    return data.data.loc.coordinates; // Returns [longitude, latitude]
+                });
+        }
+
+      function calculateDistance(lat1, lon1, lat2, lon2) {
+        const R = 6371; // Radius of Earth in kilometers
+        const dLat = ((lat2 - lat1) * Math.PI) / 180;
+        const dLon = ((lon2 - lon1) * Math.PI) / 180;
+        const a =
+          Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+          Math.cos((lat1 * Math.PI) / 180) *
+            Math.cos((lat2 * Math.PI) / 180) *
+            Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return R * c;
+      }
+
+      // Fetch address using Nominatim API (reverse geocoding)
+      function getAddress(lat, lon) {
+        return fetch(
+          `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`
+        )
+          .then((response) => response.json())
+          .then((data) => data.display_name)
+          .catch((error) => {
+            console.error("Error fetching address:", error);
+            return "Address not available";
+          });
+      }
+
+      // Function to get the user's current location
+      function getLocation() {
+        if (navigator.geolocation) {
+          navigator.geolocation.getCurrentPosition(
+            async (position) => {
+            const pos= await getCoordinates()
+              const sourceLat = pos[0];
+              const sourceLng = pos[1];
+
+              // Initialize the map centered on the user's location
+              const map = L.map("map").setView([sourceLat, sourceLng], 11);
+              const mapLink = "<a href='http://openstreetmap.org'>OpenStreetMap</a>";
+
+              L.tileLayer("http://{s}.tile.osm.org/{z}/{x}/{y}.png", {
+                attribution: "Leaflet &copy; " + mapLink + ", contribution",
+                maxZoom: 18,
+              }).addTo(map);
+
+              // Define custom icons for user and nurse
+              const nurseIcon = L.icon({
+                iconUrl:
+                  "https://png.pngtree.com/png-clipart/20231114/original/pngtree-nurse-logo-vector-png-image_13542847.png",
+                iconSize: [60, 60],
+              });
+              const userIcon = L.icon({
+                iconUrl:
+                  "https://media.istockphoto.com/id/1300845620/vector/user-icon-flat-isolated-on-white-background-user-symbol-vector-illustration.jpg?s=612x612&w=0&k=20&c=yBeyba0hUkh14_jgv1OKqIH0CCSWU_4ckRkAoy2p73o=",
+                iconSize: [60, 60],
+              });
+
+              // Fetch and display the user's address
+              const userAddress = await getAddress(sourceLat, sourceLng);
+              L.marker([sourceLat, sourceLng], { icon: userIcon })
+                .addTo(map)
+                .bindPopup(`You are here<br>${userAddress}`)
+                .openPopup();
+
+              // Retrieve user data from localStorage
+              const user = JSON.parse(localStorage.getItem("user"));
+              if (user) {
+                // Fetch nearby nurses from the backend
+                fetch(
+                  `http://localhost:8000/api/v1/users/patients/${user._id}/nearest-nurses`
+                )
+                  .then((response) => {
+                    if (!response.ok) {
+                      throw new Error(
+                        "Network response was not ok: " + response.statusText
+                      );
+                    }
+                    return response.json();
+                  })
+                  .then(async (data) => {
+                    console.log("Nurses data received:", data);
+
+                    const nurses = data;
+
+                    if (!Array.isArray(nurses)) {
+                      console.error(
+                        "Expected nurses to be an array, but got:",
+                        nurses
+                      );
+                      return;
+                    }
+
+                    // Add markers for each nurse with distance and address
+                    nurses.forEach(async (nurse) => {
+                      const nurseLat = nurse.coordinates.coordinates[0];
+                      const nurseLng = nurse.coordinates.coordinates[1];
+                      const distance = calculateDistance(
+                        sourceLat,
+                        sourceLng,
+                        nurseLat,
+                        nurseLng
+                      ).toFixed(2); // Distance in kilometers
+
+                      const nurseAddress = await getAddress(nurseLat, nurseLng);
+
+                      L.marker([nurseLat, nurseLng], { icon: nurseIcon })
+                        .addTo(map)
+                        .bindPopup(
+                          `<b>Nurse available nearby</b><br>Address: ${nurseAddress}<br>Distance: ${distance} km`
+                        );
+                    });
+                  })
+                  .catch((error) => {
+                    console.error("Error fetching nurse data:", error);
+                  });
+              } else {
+                console.error("User ID not found in localStorage.");
+                alert("Please log in to retrieve nearby nurses.");
+              }
+            },
+            (error) => {
+              console.error("Error getting location: ", error);
+              alert("Unable to retrieve your location.");
+            }
+          );
+        } else {
+          alert("Geolocation is not supported by this browser.");
+        }
+      }
+
+      // Call the function to get the location and display the map
+      getLocation();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Geolocation</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.8.0/dist/leaflet.css"
+    />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css"
+    />
+
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div id="map" style="width: 100%; height: 100vh"></div>
+    <script src="https://unpkg.com/leaflet@1.8.0/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
+
+    <script>
+      // Function to get the user's current location
+      function getCoordinates() {
+        const user = JSON.parse(localStorage.getItem("user"));
+                  // `http://localhost:8000/api/v1/users/patients/${user._id}/nearest-nurses`
+            return fetch(`http://localhost:8000/api/v1/users/getPC/${user._id}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error("Network response was not ok: " + response.statusText);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    console.log("Coordinates data received:", data.data.loc.coordinates);
+                    return data.data.loc.coordinates; // Returns [longitude, latitude]
+                });
+        }
+      function getLocation() {
+        if (navigator.geolocation) {
+          navigator.geolocation.getCurrentPosition(
+            async(position)=> {
+              const pos= await getCoordinates()
+
+              const sourceLat = pos[0];
+              const sourceLng = pos[1];
+              // var sourceLat = position.coords.latitude;/
+
+              // Initialize the map with the user's current location
+              var map = L.map("map").setView([sourceLat, sourceLng], 11);
+              var mapLink =
+                "<a href='http://openstreetmap.org'>OpenStreetMap</a>";
+              L.tileLayer("http://{s}.tile.osm.org/{z}/{x}/{y}.png", {
+                attribution: "Leaflet &copy; " + mapLink + ", contribution",
+                maxZoom: 18,
+              }).addTo(map);
+
+              // Define custom icons
+              var taxiIcon = L.icon({
+                iconUrl:
+                  "https://png.pngtree.com/png-clipart/20231114/original/pngtree-nurse-logo-vector-png-image_13542847.png", // Ensure you have this image available
+                iconSize: [70, 70],
+              });
+              var userIcon = L.icon({
+                iconUrl:
+                  "https://media.istockphoto.com/id/1300845620/vector/user-icon-flat-isolated-on-white-background-user-symbol-vector-illustration.jpg?s=612x612&w=0&k=20&c=yBeyba0hUkh14_jgv1OKqIH0CCSWU_4ckRkAoy2p73o=", // Ensure you have this image available
+                iconSize: [70, 70],
+              });
+
+              // Add a marker for the user's current location
+              var marker = L.marker([sourceLat, sourceLng])
+                .addTo(map)
+                .bindPopup("You are here")
+                .openPopup(); // Optional popup for the user's location
+
+              // Fetch nearby nurses from the backend
+              fetch("http://localhost:8000/api/v1/users/getnurses")
+                .then((response) => {
+                  // Check if the response is okay (status 200-299)
+                  if (!response.ok) {
+                    throw new Error(
+                      "Network response was not ok: " + response.statusText
+                    );
+                  }
+                  return response.json();
+                })
+                .then((data) => {
+                  // Log the full response to verify the structure
+                  console.log("Nurses data received:", data);
+
+                  // Attempt to access the nurses array
+                  const nurses =
+                    data.data && Array.isArray(data.data.nurses)
+                      ? data.data.nurses
+                      : [];
+
+                  // If nurses is not an array, log an error and return
+                  if (!Array.isArray(nurses)) {
+                    console.error(
+                      "Expected nurses to be an array, but got:",
+                      nurses
+                    );
+                    return;
+                  }
+
+                  // Add markers for each nearby nurse
+                  nurses.forEach((nurse) => {
+                    if (nurse.location && nurse.location.coordinates) {
+                      // Log nurse coordinates for debugging
+                      console.log("Nurse coordinates:", nurse.location.coordinates);
+
+                      L.marker(
+                        [
+                          nurse.location.coordinates[0],
+                          nurse.location.coordinates[1],
+                        ],
+                        { icon: taxiIcon }
+                      )
+                        .addTo(map)
+                        .bindPopup("Nurse available nearby");
+                    } else {
+                      console.warn(
+                        "Nurse location or coordinates are missing:",
+                        nurse
+                      );
+                    }
+                  });
+                })
+                .catch((error) => {
+                  // Log any error that occurs during the fetch
+                  console.error("Error fetching nurse data:", error);
+                });
+            },
+            function (error) {
+              console.error("Error getting location: ", error);
+              alert("Unable to retrieve your location.");
+            }
+          );
+        } else {
+          alert("Geolocation is not supported by this browser.");
+        }
+      }
+
+      // Call the function to get the location and display the map
+      getLocation();
+    </script>
+  </body>
+</html>
